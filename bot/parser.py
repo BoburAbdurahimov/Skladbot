@@ -36,10 +36,19 @@ class ParseResult:
 def _normalize(text: str) -> str:
     """Normalize input text for easier parsing."""
     text = text.strip().lower()
-    # Replace unicode multiplication sign
-    text = text.replace("×", "x").replace("*", "x")
-    # Convert '4.70' to '470' by removing dot between digits to support 'Ta 4.70' format inline handling
-    text = re.sub(r'(\d)\.(\d+)', r'\1\2', text)
+    # Replace unicode multiplication sign and Cyrillic 'х'
+    text = text.replace("×", "x").replace("*", "x").replace("х", "x")
+    
+    # Convert '4.70' or '4,70' or '4 . 70' to '470'
+    # Also handles '4.7' -> '470' (adds missing zero)
+    def fix_decimal(match):
+        d1 = match.group(1)
+        d2 = match.group(2)
+        if len(d2) == 1:
+            d2 += "0"
+        return d1 + d2
+    text = re.sub(r'(\d)\s*[.,]\s*(\d+)', fix_decimal, text)
+
     # Remove common unit words (ta, шт, dona, pcs, дана, sht, штук)
     text = re.sub(r'\b(ta|sht|шт|штук|dona|дана|pcs|pc|piece|pieces)\b', ' ', text)
     # Replace separators with space
@@ -187,6 +196,13 @@ def _resolve_two_numbers(
         if a > 0:
             return (ParsedItem(qty=a, length=b, width=0), None)
 
+    # Try length in meters (e.g. 11 Ta 4 means qty 11, length 400, width 0)
+    if b * 100 in ALLOWED_LENGTHS and a > 0:
+        return (ParsedItem(qty=a, length=b * 100, width=0), None)
+        
+    if a * 100 in ALLOWED_LENGTHS and b > 0:
+        return (ParsedItem(qty=b, length=a * 100, width=0), None)
+
     return (None, f"#{line_num}: Raqamlar tushunarsiz: '{line.strip()}'")
 
 
@@ -205,6 +221,14 @@ def _resolve_three_numbers(
     # Try [length, width, qty]
     if _is_valid_length(a) and _is_valid_width(b) and c > 0:
         return (ParsedItem(qty=c, length=a, width=b), None)
+
+    # Try [qty, length_in_meters, width_in_cm] (e.g. typing "7 4 70" instead of 4.70)
+    if b * 100 in ALLOWED_LENGTHS and _is_valid_width(c) and a > 0:
+        return (ParsedItem(qty=a, length=b * 100, width=c), None)
+
+    # Try [length_in_meters, width_in_cm, qty]
+    if a * 100 in ALLOWED_LENGTHS and _is_valid_width(b) and c > 0:
+        return (ParsedItem(qty=c, length=a * 100, width=b), None)
 
     # Try [qty, size_encoded] where size is one of them
     # a=qty, b+c encoded? No – try each as encoded size
