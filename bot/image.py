@@ -25,10 +25,10 @@ def _get_font(size: int, bold: bool = False) -> Union[ImageFont.FreeTypeFont, Im
         return ImageFont.load_default()
 
 
-async def render_matrix(matrix: dict[tuple[int, int], int], sklad_id: int, eni: int) -> bytes:
+async def render_matrix(matrix: dict[tuple[int, int], int], sklad_id: int) -> bytes:
     """
     Render the inventory matrix as PNG.
-    Shows corner_number in top-left, eni label in title area.
+    Shows config.name and eni in title area.
     """
     config = get_sklad_config(sklad_id)
     corner_number = config.corner_number if config else sklad_id

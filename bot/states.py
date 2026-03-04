@@ -16,21 +16,23 @@ from typing import Optional
 
 @dataclass
 class SkladConfig:
-    """Configuration for a single warehouse."""
+    """Configuration for a single warehouse entity."""
     id: int
     name: str
     corner_number: int  # number shown in top-left corner of image
+    eni: int            # 100 or 120
 
 
 SKLADS = [
-    SkladConfig(id=1, name="Toxir", corner_number=15),
-    SkladConfig(id=2, name="Kodir", corner_number=22),
-    SkladConfig(id=3, name="Istam", corner_number=22),
-    SkladConfig(id=4, name="Aziz", corner_number=15),
+    SkladConfig(id=1, name="Toxir", corner_number=15, eni=120),
+    SkladConfig(id=2, name="Toxir", corner_number=15, eni=100),
+    SkladConfig(id=3, name="Kodir", corner_number=22, eni=120),
+    SkladConfig(id=4, name="Kodir", corner_number=22, eni=100),
+    SkladConfig(id=5, name="Istam", corner_number=22, eni=120),
+    SkladConfig(id=6, name="Istam", corner_number=22, eni=100),
+    SkladConfig(id=7, name="Aziz", corner_number=15, eni=120),
+    SkladConfig(id=8, name="Aziz", corner_number=15, eni=100),
 ]
-
-# Two sub-tables per sklad
-ENI_VALUES = [120, 100]
 
 
 def get_sklad_config(sklad_id: int) -> Optional[SkladConfig]:
@@ -46,7 +48,7 @@ class ConversationStep(Enum):
     IDLE = "idle"
     WAITING_SKLAD_VIEW = "view"
     WAITING_SKLAD_OP = "sklad_op"
-    WAITING_ENI = "eni"            # Picking eni (120/100)
+    WAITING_SKLAD_CLEAR = "sklad_clear"  # Picking sklad to clear
     WAITING_BULK_TEXT = "bulk_text"
     WAITING_MORE = "more"
     WAITING_CONFIRM = "confirm"
@@ -70,7 +72,6 @@ class ChatState:
     step: ConversationStep = ConversationStep.IDLE
     mode: Optional[OperationMode] = None
     sklad_id: Optional[int] = None
-    eni: Optional[int] = None       # 120 or 100
     items: list[ParsedItem] = field(default_factory=list)
 
 
@@ -94,7 +95,6 @@ def start_operation(chat_id: int, mode: OperationMode) -> ChatState:
     state.step = ConversationStep.WAITING_SKLAD_OP
     state.mode = mode
     state.sklad_id = None
-    state.eni = None
     state.items = []
     return state
 
@@ -102,13 +102,6 @@ def start_operation(chat_id: int, mode: OperationMode) -> ChatState:
 def set_sklad(chat_id: int, sklad_id: int) -> ChatState:
     state = get_state(chat_id)
     state.sklad_id = sklad_id
-    state.step = ConversationStep.WAITING_ENI
-    return state
-
-
-def set_eni(chat_id: int, eni: int) -> ChatState:
-    state = get_state(chat_id)
-    state.eni = eni
     state.step = ConversationStep.WAITING_BULK_TEXT
     return state
 
