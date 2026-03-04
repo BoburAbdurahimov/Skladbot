@@ -38,13 +38,11 @@ from bot.states import (
     OperationMode,
     ParsedItem,
     SKLADS,
-    ENI_VALUES,
     get_sklad_config,
     get_state,
     reset_state,
     start_operation,
     set_sklad,
-    set_eni,
     set_items,
 )
 from bot.parser import parse_input, format_confirmation
@@ -72,39 +70,41 @@ def main_keyboard() -> ReplyKeyboardMarkup:
     return ReplyKeyboardMarkup(
         keyboard=[
             [
-                KeyboardButton(text="📥 Prixod"),
-                KeyboardButton(text="📤 Rasxod"),
+                KeyboardButton(text="Prixod"),
+                KeyboardButton(text="Rasxod"),
             ],
             [
-                KeyboardButton(text="📦 Sklad"),
-                KeyboardButton(text="📅 Tarix"),
+                KeyboardButton(text="Sklad"),
+                KeyboardButton(text="Tarix"),
+            ],
+            [
+                KeyboardButton(text="Tozalash"),
             ]
         ],
         resize_keyboard=True,
     )
 
 
+# Build a set of all valid sklad button labels for matching
+_SKLAD_LABELS = {f"{s.name} {s.eni}" for s in SKLADS}
+
+
 def sklad_keyboard() -> ReplyKeyboardMarkup:
     buttons = []
-    for s in SKLADS:
-        buttons.append([KeyboardButton(text=f"📦 {s.name} (Sklad {s.id})")])
-    buttons.append([KeyboardButton(text="🔙 Ortga")])
+    # 2 sklads per row
+    for i in range(0, len(SKLADS), 2):
+        row = []
+        row.append(KeyboardButton(text=f"{SKLADS[i].name} {SKLADS[i].eni}"))
+        if i + 1 < len(SKLADS):
+            row.append(KeyboardButton(text=f"{SKLADS[i+1].name} {SKLADS[i+1].eni}"))
+        buttons.append(row)
+    buttons.append([KeyboardButton(text="Ortga")])
     return ReplyKeyboardMarkup(keyboard=buttons, resize_keyboard=True)
-
-
-def eni_keyboard() -> ReplyKeyboardMarkup:
-    return ReplyKeyboardMarkup(
-        keyboard=[
-            [KeyboardButton(text=f"Eni {e}") for e in ENI_VALUES],
-            [KeyboardButton(text="🔙 Ortga")],
-        ],
-        resize_keyboard=True,
-    )
 
 
 def back_keyboard() -> ReplyKeyboardMarkup:
     return ReplyKeyboardMarkup(
-        keyboard=[[KeyboardButton(text="🔙 Ortga")]],
+        keyboard=[[KeyboardButton(text="Ortga")]],
         resize_keyboard=True,
     )
 
@@ -113,7 +113,7 @@ def tarix_keyboard() -> ReplyKeyboardMarkup:
     return ReplyKeyboardMarkup(
         keyboard=[
             [KeyboardButton(text="Bugun"), KeyboardButton(text="Kecha")],
-            [KeyboardButton(text="🔙 Ortga")],
+            [KeyboardButton(text="Ortga")],
         ],
         resize_keyboard=True,
     )
@@ -123,8 +123,8 @@ def confirm_inline_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
             [
-                InlineKeyboardButton(text="✅ Tasdiqlash", callback_data="confirm_batch"),
-                InlineKeyboardButton(text="❌ Bekor qilish", callback_data="cancel_batch"),
+                InlineKeyboardButton(text="Tasdiqlash", callback_data="confirm_batch"),
+                InlineKeyboardButton(text="Bekor qilish", callback_data="cancel_batch"),
             ]
         ]
     )
@@ -173,48 +173,54 @@ def parse_date_to_timestamps(date_txt: str) -> Optional[tuple[float, float]]:
 async def cmd_start(message: Message):
     reset_state(message.chat.id)
     await message.answer(
-        "🏭 <b>Sklad Bot</b>\n\nQuyidagi tugmalardan birini tanlang:",
+        "<b>Sklad Bot</b>\n\nQuyidagi tugmalardan birini tanlang:",
         reply_markup=main_keyboard(),
     )
 
 
 # ─── Main menu buttons ─────────────────────────────────────────────
 
-@router.message(F.text == "📥 Prixod")
+@router.message(F.text == "Prixod")
 async def btn_prixod(message: Message):
     start_operation(message.chat.id, OperationMode.IN)
-    await message.answer("📥 <b>PRIXOD</b>\n\nQaysi skladga?", reply_markup=sklad_keyboard())
+    await message.answer("<b>PRIXOD</b>\n\nQaysi skladga?", reply_markup=sklad_keyboard())
 
 
-@router.message(F.text == "📤 Rasxod")
+@router.message(F.text == "Rasxod")
 async def btn_rasxod(message: Message):
     start_operation(message.chat.id, OperationMode.OUT)
-    await message.answer("📤 <b>RASXOD</b>\n\nQaysi skladdan?", reply_markup=sklad_keyboard())
+    await message.answer("<b>RASXOD</b>\n\nQaysi skladdan?", reply_markup=sklad_keyboard())
 
 
-@router.message(F.text == "📦 Sklad")
+@router.message(F.text == "Sklad")
 async def btn_sklad(message: Message):
     state = get_state(message.chat.id)
     state.step = ConversationStep.WAITING_SKLAD_VIEW
     state.mode = None
     state.sklad_id = None
-    state.eni = None
-    state.qty = None
     state.items = []
-    await message.answer("📦 <b>Skladni tanlang:</b>", reply_markup=sklad_keyboard())
+    await message.answer("<b>Skladni tanlang:</b>", reply_markup=sklad_keyboard())
 
 
-@router.message(F.text == "📅 Tarix")
+@router.message(F.text == "Tozalash")
+async def btn_tozalash(message: Message):
+    state = get_state(message.chat.id)
+    state.step = ConversationStep.WAITING_SKLAD_CLEAR
+    state.mode = None
+    state.sklad_id = None
+    state.items = []
+    await message.answer("🧹 <b>Qaysi sklad ma'lumotlarini tozalash kerak?</b>", reply_markup=sklad_keyboard())
+
+
+@router.message(F.text == "Tarix")
 async def btn_tarix(message: Message):
     state = get_state(message.chat.id)
     state.step = ConversationStep.WAITING_DATE
     state.mode = None
     state.sklad_id = None
-    state.eni = None
-    state.qty = None
     state.items = []
     await message.answer(
-        "📅 <b>Tarix</b>\n\nQaysi kun bo'yicha hisobot kerak?\n\n"
+        "<b>Tarix</b>\n\nQaysi kun bo'yicha hisobot kerak?\n\n"
         "Tugmalardan birini tanlang yoki sanani <code>kk.oo.yyyy</code> formatida kiriting (masalan: <b>04.03.2026</b>).",
         reply_markup=tarix_keyboard()
     )
@@ -222,94 +228,65 @@ async def btn_tarix(message: Message):
 
 # ─── Back / Cancel ──────────────────────────────────────────────────
 
-@router.message(F.text == "🔙 Ortga")
+@router.message(F.text == "Ortga")
 async def btn_back(message: Message):
     reset_state(message.chat.id)
     await message.answer("Bosh menyu:", reply_markup=main_keyboard())
 
 
-@router.message(F.text == "❌ Bekor qilish")
+@router.message(F.text == "Bekor qilish")
 async def btn_cancel(message: Message):
     reset_state(message.chat.id)
-    await message.answer("❌ <b>Bekor qilindi.</b>", reply_markup=main_keyboard())
+    await message.answer("<b>Bekor qilindi.</b>", reply_markup=main_keyboard())
 
 
 # ─── Sklad selection ───────────────────────────────────────────────
 
-@router.message(F.text.contains("Sklad "))
+@router.message(F.text.func(lambda t: t in _SKLAD_LABELS))
 async def btn_sklad_pick(message: Message):
     chat_id = message.chat.id
     state = get_state(chat_id)
-    text = message.text
+    text = message.text.strip()
 
-    # Parse sklad id from button text like "📦 Toxir (Sklad 1)"
+    # Find the sklad by matching "Name Eni" label
     sklad_num = None
     for s in SKLADS:
-        if f"Sklad {s.id}" in text:
+        if text == f"{s.name} {s.eni}":
             sklad_num = s.id
             break
 
     if sklad_num is None:
-        await message.answer("⚠️ Noto'g'ri sklad.", reply_markup=main_keyboard())
+        await message.answer("Noto'g'ri sklad.", reply_markup=main_keyboard())
         return
 
     config = get_sklad_config(sklad_num)
+    sklad_label = f"{config.name} {config.eni}" if config else f"Sklad {sklad_num}"
 
     if state.step == ConversationStep.WAITING_SKLAD_VIEW:
-        # Send BOTH eni images for this sklad
         await send_sklad_images(message, sklad_num)
         reset_state(chat_id)
         await message.answer("Bosh menyu:", reply_markup=main_keyboard())
 
+    elif state.step == ConversationStep.WAITING_SKLAD_CLEAR:
+        from bot.db import clear_sklad
+        success = await clear_sklad(sklad_num)
+        reset_state(chat_id)
+        if success:
+            await message.answer(f"✅ <b>{sklad_label} tozalandi!</b>", reply_markup=main_keyboard())
+        else:
+            await message.answer(f"❌ <b>Xatolik yuz berdi.</b>", reply_markup=main_keyboard())
+
     elif state.step == ConversationStep.WAITING_SKLAD_OP:
         set_sklad(chat_id, sklad_num)
         mode_label = "PRIXOD" if state.mode == OperationMode.IN else "RASXOD"
-        sklad_label = f"{config.name}" if config else f"Sklad {sklad_num}"
         await message.answer(
-            f"📦 <b>{sklad_label}</b> — {mode_label}\n\n"
-            f"Enini tanlang:",
-            reply_markup=eni_keyboard(),
+            f"<b>{sklad_label}</b> — {mode_label}",
+            reply_markup=back_keyboard(),
         )
     else:
         await send_sklad_images(message, sklad_num)
         reset_state(chat_id)
         await message.answer("Bosh menyu:", reply_markup=main_keyboard())
-
-
-# ─── Eni selection ──────────────────────────────────────────────────
-
-@router.message(F.text.startswith("Eni "))
-async def btn_eni_pick(message: Message):
-    chat_id = message.chat.id
-    state = get_state(chat_id)
-
-    if state.step != ConversationStep.WAITING_ENI:
-        reset_state(chat_id)
-        await message.answer("Bosh menyu:", reply_markup=main_keyboard())
-        return
-
-    try:
-        eni_val = int(message.text.split()[-1])
-        if eni_val not in ENI_VALUES:
-            raise ValueError()
-    except ValueError:
-        await message.answer("⚠️ Noto'g'ri eni. 120 yoki 100 tanlang.", reply_markup=eni_keyboard())
-        return
-
-    set_eni(chat_id, eni_val)
-    config = get_sklad_config(state.sklad_id)
-    sklad_label = f"{config.name}" if config else f"Sklad {state.sklad_id}"
-    mode_label = "PRIXOD" if state.mode == OperationMode.IN else "RASXOD"
-
-    await message.answer(
-        f"📦 <b>{sklad_label}</b> — Eni {eni_val} — {mode_label}\n\n"
-        f"📝 Ma'lumotlarni kiriting:\n\n"
-        f"Misol:\n"
-        f"<code>7    Ta 4.70\n"
-        f"11  Ta 4.00\n"
-        f"1    Ta 5.20</code>",
-        reply_markup=back_keyboard(),
-    )
 
 
 # ─── Inline confirm/cancel callbacks ───────────────────────────────
@@ -320,32 +297,32 @@ async def on_confirm(callback: CallbackQuery):
     state = get_state(chat_id)
 
     if state.step != ConversationStep.WAITING_CONFIRM or not state.items:
-        await callback.answer("⚠️ Tasdiqlanadigan amal yo'q.", show_alert=True)
+        await callback.answer("Tasdiqlanadigan amal yo'q.", show_alert=True)
         return
 
     items = state.items
     sklad_id = state.sklad_id
-    eni = state.eni
     mode = state.mode
 
-    success, msg = await apply_bulk_operation(sklad_id, eni, mode, items)
+    success, msg = await apply_bulk_operation(sklad_id, mode, items)
 
     config = get_sklad_config(sklad_id)
-    sklad_label = f"{config.name}" if config else f"Sklad {sklad_id}"
+    sklad_label = f"{config.name} {config.eni}" if config else f"Sklad {sklad_id}"
     reset_state(chat_id)
 
     if success:
         mode_label = "PRIXOD" if mode == OperationMode.IN else "RASXOD"
-        emoji = "📥" if mode == OperationMode.IN else "📤"
-        total = sum(i.qty for i in items)
+        total_qty = sum(i.qty for i in items)
+        total_metr = sum((i.qty * (i.length + i.width)) / 100 for i in items)
+        
         await callback.message.edit_text(
-            f"{emoji} <b>{mode_label} tasdiqlandi!</b>\n\n"
-            f"📦 {sklad_label} — Eni {eni}\n"
-            f"📋 {len(items)} pozitsiya, jami {total} ta\n\n"
+            f"<b>{mode_label} tasdiqlandi!</b>\n\n"
+            f"{sklad_label}\n"
+            f"{len(items)}/{total_qty}/{total_metr:g}\n\n"
             f"{msg}"
         )
     else:
-        await callback.message.edit_text(f"❌ <b>Rad etildi:</b>\n{msg}")
+        await callback.message.edit_text(f"<b>Rad etildi:</b>\n{msg}")
 
     await callback.answer()
     await callback.message.answer("Bosh menyu:", reply_markup=main_keyboard())
@@ -354,7 +331,7 @@ async def on_confirm(callback: CallbackQuery):
 @router.callback_query(F.data == "cancel_batch")
 async def on_cancel(callback: CallbackQuery):
     reset_state(callback.message.chat.id)
-    await callback.message.edit_text("❌ <b>Bekor qilindi.</b>")
+    await callback.message.edit_text("<b>Bekor qilindi.</b>")
     await callback.answer()
     await callback.message.answer("Bosh menyu:", reply_markup=main_keyboard())
 
@@ -372,7 +349,7 @@ async def handle_text(message: Message):
         result = parse_input(text)
 
         if not result.items and not result.errors:
-            await message.answer("⚠️ Hech qanday ma'lumot topilmadi. Qaytadan urinib ko'ring yoki /start bosing.")
+            await message.answer("Hech qanday ma'lumot topilmadi. Qaytadan urinib ko'ring yoki /start bosing.")
             return
 
         set_items(chat_id, result.items)
@@ -382,15 +359,17 @@ async def handle_text(message: Message):
         conf_text = format_confirmation(result, mode_label)
         
         config = get_sklad_config(state.sklad_id)
-        sklad_label = f"{config.name}" if config else f"Sklad {state.sklad_id}"
+        sklad_label = f"{config.name} {config.eni}" if config else f"Sklad {state.sklad_id}"
 
         # If there are items, we show confirm button. If only errors, None.
         markup = confirm_inline_keyboard() if result.items else None
         
-        tasdiq_matn = "\nTasdiqlaysizmi?" if result.items else ""
+        total_qty = sum(i.qty for i in result.items)
+        total_metr = sum((i.qty * (i.length + i.width)) / 100 for i in result.items)
+        tasdiq_matn = f"\n{len(result.items)}/{total_qty}/{total_metr:g}\nTasdiqlaysizmi?" if result.items else ""
 
         await message.answer(
-            f"📦 <b>{sklad_label}</b> — Eni {state.eni}\n\n"
+            f"<b>{sklad_label}</b>\n\n"
             f"{conf_text}\n{tasdiq_matn}",
             reply_markup=markup,
         )
@@ -400,24 +379,23 @@ async def handle_text(message: Message):
     if state.step == ConversationStep.WAITING_DATE:
         ts_range = parse_date_to_timestamps(text)
         if not ts_range:
-            await message.answer("⚠️ Noto'g'ri sana formati.\nMasalan: <code>04.03.2026</code> yoki quyidagi tugmalardan birini bosing:", reply_markup=tarix_keyboard())
+            await message.answer("Noto'g'ri sana formati.\nMasalan: <code>04.03.2026</code> yoki quyidagi tugmalardan birini bosing:", reply_markup=tarix_keyboard())
             return
             
         start_ts, end_ts = ts_range
         movements = await get_daily_movements(start_ts, end_ts)
         
         if not movements:
-            await message.answer(f"📭 Bu sanada hech qanday harakat yo'q: <b>{text}</b>", reply_markup=main_keyboard())
+            await message.answer(f"Bu sanada hech qanday harakat yo'q: <b>{text}</b>", reply_markup=main_keyboard())
             reset_state(chat_id)
             return
             
-        lines = [f"📅 <b>Harakatlar tarixi: {text}</b>\n"]
+        lines = [f"<b>Harakatlar tarixi: {text}</b>\n"]
         for m in movements:
             config = get_sklad_config(m.sklad_id)
-            s_name = config.name if config else f"Sklad {m.sklad_id}"
-            emoji = "📥" if m.operation == "PRIXOD" else "📤"
+            s_name = f"{config.name} {config.eni}" if config else f"Sklad {m.sklad_id}"
             t_str = datetime.fromtimestamp(m.timestamp, TZ_TASHKENT).strftime("%H:%M")
-            lines.append(f"{emoji} <b>{s_name} (Eni {m.eni})</b> — {t_str}")
+            lines.append(f"<b>{s_name}</b> — {t_str}")
             lines.append(f"   <i>{m.details}</i>\n")
             
         # Send in chunks if very large, but usually fits
@@ -431,12 +409,8 @@ async def handle_text(message: Message):
 
     # ─── Catch-all for active states ─────────────────────────────
 
-    if state.step in [ConversationStep.WAITING_SKLAD_VIEW, ConversationStep.WAITING_SKLAD_OP]:
-        await message.answer("⚠️ Iltimos, quyidagi tugmalardan skladni tanlang:", reply_markup=sklad_keyboard())
-        return
-
-    if state.step == ConversationStep.WAITING_ENI:
-        await message.answer("⚠️ Iltimos, quyidagi tugmalardan enini tanlang:", reply_markup=eni_keyboard())
+    if state.step in [ConversationStep.WAITING_SKLAD_VIEW, ConversationStep.WAITING_SKLAD_OP, ConversationStep.WAITING_SKLAD_CLEAR]:
+        await message.answer("Iltimos, quyidagi tugmalardan skladni tanlang:", reply_markup=sklad_keyboard())
         return
 
     # ─── Truly unknown input (e.g., when IDLE) ───────────────────
@@ -448,16 +422,18 @@ async def handle_text(message: Message):
 
 async def send_sklad_images(message: Message, sklad_id: int):
     config = get_sklad_config(sklad_id)
-    sklad_label = f"{config.name} (Sklad {config.id})" if config else f"Sklad {sklad_id}"
+    sklad_name = f"{config.name} {config.eni}" if config else f"Sklad {sklad_id}"
     try:
-        for eni in ENI_VALUES:
-            matrix = await get_matrix(sklad_id, eni)
-            img_bytes = await render_matrix(matrix, sklad_id, eni)
-            photo = BufferedInputFile(img_bytes, filename=f"sklad_{sklad_id}_eni{eni}.png")
-            await message.answer_photo(
-                photo=photo,
-                caption=f"📦 <b>{sklad_label}</b> — Eni {eni}",
-            )
+        matrix = await get_matrix(sklad_id)
+        # Calculate total meters from all items in the matrix
+        total_metr = sum(qty * (length + width) / 100 for (length, width), qty in matrix.items() if qty > 0)
+        img_bytes = await render_matrix(matrix, sklad_id)
+        photo = BufferedInputFile(img_bytes, filename=f"sklad_{sklad_id}.png")
+        metr_text = f" — {total_metr:g}m" if total_metr > 0 else ""
+        await message.answer_photo(
+            photo=photo,
+            caption=f"<b>{sklad_name}{metr_text}</b>",
+        )
     except Exception as e:
         logger.exception("Error generating sklad image")
-        await message.answer(f"❌ Rasm yaratishda xatolik: {e}")
+        await message.answer(f"Rasm yaratishda xatolik: {e}")
