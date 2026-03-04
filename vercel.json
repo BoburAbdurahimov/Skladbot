@@ -13,6 +13,7 @@
         }
     ],
     "env": {
-        "SKLAD_DB_PATH": "/tmp/sklad.db"
+        "SKLAD_DB_PATH": "/tmp/sklad.db",
+        "BOT_TOKEN": "8724497147:AAGwX3FrpDyiv45E6zhZHRzGYDNXD_25h-8"
     }
 }
