@@ -5,6 +5,8 @@ Handles many messy input formats, extracts (qty, length, width) triples.
 
 from __future__ import annotations
 
+from typing import Optional, Union
+
 import re
 from dataclasses import dataclass, field
 
@@ -28,7 +30,7 @@ class ParseResult:
     """Result of parsing a multi-line input."""
     items: list[ParsedItem] = field(default_factory=list)
     errors: list[str] = field(default_factory=list)
-    detected_mode: str | None = None  # "in", "out", or None
+    detected_mode: Optional[str] = None  # "in", "out", or None
 
 
 def _normalize(text: str) -> str:
@@ -36,6 +38,8 @@ def _normalize(text: str) -> str:
     text = text.strip().lower()
     # Replace unicode multiplication sign
     text = text.replace("×", "x").replace("*", "x")
+    # Convert '4.70' to '470' by removing dot between digits to support 'Ta 4.70' format inline handling
+    text = re.sub(r'(\d)\.(\d+)', r'\1\2', text)
     # Remove common unit words (ta, шт, dona, pcs, дана, sht, штук)
     text = re.sub(r'\b(ta|sht|шт|штук|dona|дана|pcs|pc|piece|pieces)\b', ' ', text)
     # Replace separators with space
@@ -48,7 +52,7 @@ def _normalize(text: str) -> str:
     return '\n'.join(lines)
 
 
-def _decode_size(size: int) -> tuple[int, int] | None:
+def _decode_size(size: int) -> Optional[tuple[int, int]]:
     """
     Decode a single encoded size number to (length, width).
     E.g. 680 -> (600, 80), 740 -> (700, 40).
@@ -74,7 +78,7 @@ def _is_valid_size(n: int) -> bool:
     return n in _VALID_SIZES
 
 
-def _detect_mode_in_line(line: str) -> str | None:
+def _detect_mode_in_line(line: str) -> Optional[str]:
     """Check if a line contains a mode trigger word. Returns 'in', 'out', or None."""
     words = set(re.findall(r'[a-zA-Zа-яА-ЯёЁ+\-]+', line))
     for w in words:
@@ -86,7 +90,7 @@ def _detect_mode_in_line(line: str) -> str | None:
     return None
 
 
-def _parse_line(line: str, line_num: int) -> tuple[ParsedItem | None, str | None]:
+def _parse_line(line: str, line_num: int) -> tuple[Optional[ParsedItem], Optional[str]]:
     """
     Parse a single line to extract (qty, length, width).
     Returns (ParsedItem, None) on success or (None, error_message) on failure.
@@ -142,7 +146,7 @@ def _parse_line(line: str, line_num: int) -> tuple[ParsedItem | None, str | None
 
 def _resolve_two_numbers(
     a: int, b: int, line: str, line_num: int
-) -> tuple[ParsedItem | None, str | None]:
+) -> tuple[Optional[ParsedItem], Optional[str]]:
     """Resolve two numbers into (qty, size) or (size, qty)."""
     a_is_size = _is_valid_size(a)
     b_is_size = _is_valid_size(b)
@@ -188,7 +192,7 @@ def _resolve_two_numbers(
 
 def _resolve_three_numbers(
     nums: list[int], line: str, line_num: int
-) -> tuple[ParsedItem | None, str | None]:
+) -> tuple[Optional[ParsedItem], Optional[str]]:
     """
     Resolve three numbers: could be [qty, length, width] or [length, width, qty].
     """
@@ -218,7 +222,7 @@ def _resolve_three_numbers(
 
 def _resolve_many_numbers(
     nums: list[int], line: str, line_num: int
-) -> tuple[ParsedItem | None, str | None]:
+) -> tuple[Optional[ParsedItem], Optional[str]]:
     """Try to find a valid (qty, length, width) among 4+ numbers."""
     # Strategy: look for longest×width pattern
     for i in range(len(nums)):

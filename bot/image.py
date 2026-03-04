@@ -5,6 +5,8 @@ White bg, red headers, purple cell values, corner number + eni label.
 
 from __future__ import annotations
 
+from typing import Optional, Union
+
 import io
 from PIL import Image, ImageDraw, ImageFont
 
@@ -12,26 +14,15 @@ from bot.db import ALLOWED_LENGTHS, ALLOWED_WIDTHS
 from bot.states import get_sklad_config
 
 
-def _get_font(size: int, bold: bool = False) -> ImageFont.FreeTypeFont | ImageFont.ImageFont:
-    if bold:
-        candidates = [
-            "C:/Windows/Fonts/arialbd.ttf",
-            "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
-            "/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf",
-        ]
-    else:
-        candidates = [
-            "C:/Windows/Fonts/arial.ttf",
-            "arial.ttf",
-            "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
-            "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",
-        ]
-    for fp in candidates:
-        try:
-            return ImageFont.truetype(fp, size)
-        except (IOError, OSError):
-            continue
-    return ImageFont.load_default()
+import os
+
+def _get_font(size: int, bold: bool = False) -> Union[ImageFont.FreeTypeFont, ImageFont.ImageFont]:
+    font_path = os.path.join(os.path.dirname(__file__), "Roboto-Bold.ttf")
+    try:
+        return ImageFont.truetype(font_path, size)
+    except (IOError, OSError):
+        # Fallback to defaults if somehow missing during dev
+        return ImageFont.load_default()
 
 
 async def render_matrix(matrix: dict[tuple[int, int], int], sklad_id: int, eni: int) -> bytes:
@@ -46,8 +37,8 @@ async def render_matrix(matrix: dict[tuple[int, int], int], sklad_id: int, eni: 
     lengths = ALLOWED_LENGTHS
     widths = ALLOWED_WIDTHS
 
-    cell_w = 70
-    cell_h = 55
+    cell_w = 85
+    cell_h = 65
     header_h = cell_h
     header_w = cell_w
 
@@ -56,16 +47,16 @@ async def render_matrix(matrix: dict[tuple[int, int], int], sklad_id: int, eni: 
 
     bg_color = (255, 255, 255)
     grid_color = (0, 0, 0)
-    header_text_color = (200, 0, 0)
+    header_text_color = (220, 0, 0)
     cell_text_color = (90, 50, 140)
     corner_color = (0, 0, 0)
 
     img = Image.new("RGB", (total_w, total_h), bg_color)
     draw = ImageDraw.Draw(img)
 
-    font_header = _get_font(22, bold=True)
-    font_cell = _get_font(20, bold=True)
-    font_corner = _get_font(26, bold=True)
+    font_header = _get_font(34, bold=True)
+    font_cell = _get_font(30, bold=True)
+    font_corner = _get_font(42, bold=True)
 
     # ─── Corner number in top-left cell ──────────────────────────
     corner_label = str(corner_number)

@@ -11,6 +11,8 @@ Flow:
 
 from __future__ import annotations
 
+from typing import Optional, Union
+
 import os
 import logging
 from datetime import datetime, timedelta, timezone
@@ -43,11 +45,9 @@ from bot.states import (
     start_operation,
     set_sklad,
     set_eni,
-    set_qty,
-    add_item,
-    continue_adding,
-    format_items_summary,
+    set_items,
 )
+from bot.parser import parse_input, format_confirmation
 from bot.db import (
     apply_bulk_operation,
     get_matrix,
@@ -119,19 +119,6 @@ def tarix_keyboard() -> ReplyKeyboardMarkup:
     )
 
 
-def add_more_keyboard() -> ReplyKeyboardMarkup:
-    return ReplyKeyboardMarkup(
-        keyboard=[
-            [
-                KeyboardButton(text="➕ Yana qo'shish"),
-                KeyboardButton(text="✅ Tasdiqlash"),
-            ],
-            [KeyboardButton(text="❌ Bekor qilish")],
-        ],
-        resize_keyboard=True,
-    )
-
-
 def confirm_inline_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
@@ -151,7 +138,7 @@ for _l in ALLOWED_LENGTHS:
         _VALID_SIZES.add(_l + _w)
 
 
-def decode_size(code: int) -> tuple[int, int] | None:
+def decode_size(code: int) -> Optional[tuple[int, int]]:
     if code in _VALID_SIZES:
         length = (code // 100) * 100
         width = code % 100
@@ -160,7 +147,7 @@ def decode_size(code: int) -> tuple[int, int] | None:
     return None
 
 
-def parse_date_to_timestamps(date_txt: str) -> tuple[float, float] | None:
+def parse_date_to_timestamps(date_txt: str) -> Optional[tuple[float, float]]:
     """Parse text ('Bugun', 'Kecha', 'dd.mm.yyyy') into start and end timestamps."""
     now = datetime.now(TZ_TASHKENT)
     text_lower = date_txt.lower()
@@ -247,48 +234,6 @@ async def btn_cancel(message: Message):
     await message.answer("❌ <b>Bekor qilindi.</b>", reply_markup=main_keyboard())
 
 
-# ─── Add more / Confirm reply buttons ──────────────────────────────
-
-@router.message(F.text == "➕ Yana qo'shish")
-async def btn_add_more(message: Message):
-    chat_id = message.chat.id
-    state = get_state(chat_id)
-    if state.step != ConversationStep.WAITING_MORE:
-        reset_state(chat_id)
-        await message.answer("Bosh menyu:", reply_markup=main_keyboard())
-        return
-    continue_adding(chat_id)
-    await message.answer("🔢 Miqdorni kiriting:", reply_markup=back_keyboard())
-
-
-@router.message(F.text == "✅ Tasdiqlash")
-async def btn_confirm_batch(message: Message):
-    chat_id = message.chat.id
-    state = get_state(chat_id)
-    if state.step != ConversationStep.WAITING_MORE or not state.items:
-        reset_state(chat_id)
-        await message.answer("Bosh menyu:", reply_markup=main_keyboard())
-        return
-
-    config = get_sklad_config(state.sklad_id)
-    sklad_label = f"{config.name} (Sklad {config.id})" if config else f"Sklad {state.sklad_id}"
-    mode_label = "PRIXOD" if state.mode == OperationMode.IN else "RASXOD"
-    emoji = "📥" if state.mode == OperationMode.IN else "📤"
-    summary = format_items_summary(state)
-    total = sum(item.qty for item in state.items)
-
-    state.step = ConversationStep.WAITING_CONFIRM
-
-    await message.answer(
-        f"{emoji} <b>{mode_label} — Yakuniy tasdiq</b>\n\n"
-        f"📦 Sklad: <b>{sklad_label}</b>\n"
-        f"📐 Eni: <b>{state.eni}</b>\n"
-        f"📋 Pozitsiyalar: <b>{len(state.items)}</b>, jami: <b>{total}</b> ta\n\n"
-        f"{summary}\n",
-        reply_markup=confirm_inline_keyboard(),
-    )
-
-
 # ─── Sklad selection ───────────────────────────────────────────────
 
 @router.message(F.text.contains("Sklad "))
@@ -358,7 +303,11 @@ async def btn_eni_pick(message: Message):
 
     await message.answer(
         f"📦 <b>{sklad_label}</b> — Eni {eni_val} — {mode_label}\n\n"
-        f"🔢 Miqdorni kiriting:",
+        f"📝 Ma'lumotlarni kiriting:\n\n"
+        f"Misol:\n"
+        f"<code>7    Ta 4.70\n"
+        f"11  Ta 4.00\n"
+        f"1    Ta 5.20</code>",
         reply_markup=back_keyboard(),
     )
 
@@ -418,62 +367,32 @@ async def handle_text(message: Message):
     state = get_state(chat_id)
     text = message.text.strip()
 
-    # ─── Waiting for quantity ────────────────────────────────────
-    if state.step == ConversationStep.WAITING_QTY:
-        try:
-            qty = int(text)
-            if qty <= 0:
-                raise ValueError()
-        except ValueError:
-            await message.answer("⚠️ Iltimos, musbat son kiriting.\n\nMisol: <code>5</code>")
+    # ─── Waiting for bulk text ───────────────────────────────────
+    if state.step == ConversationStep.WAITING_BULK_TEXT:
+        result = parse_input(text)
+
+        if not result.items and not result.errors:
+            await message.answer("⚠️ Hech qanday ma'lumot topilmadi. Qaytadan urinib ko'ring yoki /start bosing.")
             return
 
-        set_qty(chat_id, qty)
-        await message.answer(
-            f"🔢 Miqdor: <b>{qty}</b> ta\n\n"
-            f"📏 O'lchamni kiriting (masalan: <code>680</code> = 600×80)",
-            reply_markup=back_keyboard(),
-        )
-        return
-
-    # ─── Waiting for size code ───────────────────────────────────
-    if state.step == ConversationStep.WAITING_SIZE:
-        try:
-            code = int(text)
-        except ValueError:
-            await message.answer(
-                "⚠️ Iltimos, raqam kiriting.\n\nMisol: <code>680</code> = 600×80"
-            )
-            return
-
-        decoded = decode_size(code)
-        if decoded is None:
-            await message.answer(
-                f"⚠️ <b>{code}</b> — noto'g'ri o'lcham!\n\n"
-                f"📏 Uzunlik: {', '.join(str(l) for l in ALLOWED_LENGTHS)}\n"
-                f"📐 Kenglik: {', '.join(str(w) for w in ALLOWED_WIDTHS)}\n\n"
-                f"Misol: <code>680</code> = 600×80"
-            )
-            return
-
-        length, width = decoded
-        item = ParsedItem(qty=state.qty, length=length, width=width)
-        add_item(chat_id, item)
-
+        set_items(chat_id, result.items)
         state = get_state(chat_id)
-        summary = format_items_summary(state)
+        
+        mode_label = "PRIXOD" if state.mode == OperationMode.IN else "RASXOD"
+        conf_text = format_confirmation(result, mode_label)
+        
         config = get_sklad_config(state.sklad_id)
         sklad_label = f"{config.name}" if config else f"Sklad {state.sklad_id}"
-        mode_label = "PRIXOD" if state.mode == OperationMode.IN else "RASXOD"
-        emoji = "📥" if state.mode == OperationMode.IN else "📤"
+
+        # If there are items, we show confirm button. If only errors, None.
+        markup = confirm_inline_keyboard() if result.items else None
+        
+        tasdiq_matn = "\nTasdiqlaysizmi?" if result.items else ""
 
         await message.answer(
-            f"{emoji} <b>{mode_label} — {sklad_label} — Eni {state.eni}</b>\n\n"
-            f"✅ Qo'shildi: <b>{item.qty}</b> ta — {length}×{width}\n\n"
-            f"📋 <b>Ro'yxat ({len(state.items)}):</b>\n"
-            f"{summary}\n\n"
-            f"Yana qo'shasizmi yoki tasdiqlaysizmi?",
-            reply_markup=add_more_keyboard(),
+            f"📦 <b>{sklad_label}</b> — Eni {state.eni}\n\n"
+            f"{conf_text}\n{tasdiq_matn}",
+            reply_markup=markup,
         )
         return
 
@@ -511,9 +430,6 @@ async def handle_text(message: Message):
         return
 
     # ─── Catch-all for active states ─────────────────────────────
-    if state.step == ConversationStep.WAITING_MORE:
-        await message.answer("⚠️ Iltimos, quyidagi tugmalardan birini tanlang:", reply_markup=add_more_keyboard())
-        return
 
     if state.step in [ConversationStep.WAITING_SKLAD_VIEW, ConversationStep.WAITING_SKLAD_OP]:
         await message.answer("⚠️ Iltimos, quyidagi tugmalardan skladni tanlang:", reply_markup=sklad_keyboard())
