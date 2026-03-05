@@ -1,6 +1,6 @@
 """
 Database layer for the Sklad bot.
-Uses Turso (libsql) for persistent cloud storage.
+Uses Turso (libsql-client) for persistent cloud storage.
 4 named warehouses, Lengths: 200-800, Widths: 0-90.
 """
 
@@ -11,7 +11,7 @@ import time
 import asyncio
 from dataclasses import dataclass
 
-import libsql_experimental as libsql
+import libsql_client
 
 from bot.states import ParsedItem, OperationMode, SKLADS
 
@@ -32,9 +32,8 @@ SKLAD_COUNT = len(SKLADS)
 
 def _get_conn():
     """Get a connection to the Turso database."""
-    conn = libsql.connect("sklad.db", sync_url=TURSO_URL, auth_token=TURSO_TOKEN)
-    conn.sync()
-    return conn
+    # Use the synchronous client for simplicity and thread safety
+    return libsql_client.create_client_sync(url=TURSO_URL, auth_token=TURSO_TOKEN)
 
 
 def _init_db(conn):
@@ -46,7 +45,7 @@ def _init_db(conn):
             width    INTEGER NOT NULL,
             quantity INTEGER NOT NULL DEFAULT 0,
             UNIQUE(sklad_id, length, width)
-        );
+        )
     """)
     conn.execute("""
         CREATE TABLE IF NOT EXISTS movements (
@@ -55,17 +54,15 @@ def _init_db(conn):
             operation TEXT    NOT NULL,
             details   TEXT    NOT NULL,
             timestamp REAL    NOT NULL
-        );
+        )
     """)
     for s in SKLADS:
         for l in ALLOWED_LENGTHS:
             for w in ALLOWED_WIDTHS:
                 conn.execute(
                     "INSERT OR IGNORE INTO inventory (sklad_id, length, width, quantity) VALUES (?, ?, ?, 0)",
-                    (s.id, l, w),
+                    [s.id, l, w],
                 )
-    conn.commit()
-    conn.sync()
 
 
 # Initialize on import
@@ -75,11 +72,11 @@ _init_db(_conn)
 
 async def get_matrix(sklad_id: int) -> dict[tuple[int, int], int]:
     def _query():
-        rows = _conn.execute(
+        rs = _conn.execute(
             "SELECT length, width, quantity FROM inventory WHERE sklad_id=? ORDER BY length, width",
-            (sklad_id,),
-        ).fetchall()
-        return {(r[0], r[1]): r[2] for r in rows}
+            [sklad_id],
+        )
+        return {(r[0], r[1]): r[2] for r in rs.rows}
     return await asyncio.to_thread(_query)
 
 
@@ -92,11 +89,12 @@ async def apply_bulk_operation(
         try:
             if mode == OperationMode.OUT:
                 for item in items:
-                    row = _conn.execute(
+                    rs = _conn.execute(
                         "SELECT quantity FROM inventory WHERE sklad_id=? AND length=? AND width=?",
-                        (sklad_id, item.length, item.width),
-                    ).fetchone()
-                    current = row[0] if row else 0
+                        [sklad_id, item.length, item.width],
+                    )
+                    
+                    current = rs.rows[0][0] if rs.rows else 0
                     if current < item.qty:
                         return (
                             False,
@@ -106,27 +104,34 @@ async def apply_bulk_operation(
 
             sign = 1 if mode == OperationMode.IN else -1
             details_parts = []
+            
+            # Using a transaction to ensure atomic bulk insert
+            stmts = []
             for item in items:
                 delta = item.qty * sign
-                _conn.execute(
-                    """
-                    INSERT INTO inventory (sklad_id, length, width, quantity)
-                    VALUES (?, ?, ?, ?)
-                    ON CONFLICT(sklad_id, length, width) DO UPDATE SET quantity = quantity + ?
-                    """,
-                    (sklad_id, item.length, item.width, max(0, delta), delta),
+                stmts.append(
+                    libsql_client.Statement(
+                        """
+                        INSERT INTO inventory (sklad_id, length, width, quantity)
+                        VALUES (?, ?, ?, ?)
+                        ON CONFLICT(sklad_id, length, width) DO UPDATE SET quantity = quantity + ?
+                        """,
+                        [sklad_id, item.length, item.width, max(0, delta), delta]
+                    )
                 )
                 op_label = "+" if sign > 0 else "-"
                 details_parts.append(f"{op_label}{item.qty} {item.length}x{item.width}")
 
             op_name = "PRIXOD" if mode == OperationMode.IN else "RASXOD"
-            _conn.execute(
-                "INSERT INTO movements (sklad_id, operation, details, timestamp) VALUES (?, ?, ?, ?)",
-                (sklad_id, op_name, "; ".join(details_parts), time.time()),
+            stmts.append(
+                libsql_client.Statement(
+                    "INSERT INTO movements (sklad_id, operation, details, timestamp) VALUES (?, ?, ?, ?)",
+                    [sklad_id, op_name, "; ".join(details_parts), time.time()]
+                )
             )
 
-            _conn.commit()
-            _conn.sync()
+            _conn.execute_batch(stmts)
+
             total_qty = sum(i.qty for i in items)
             total_metr = sum((i.qty * (i.length + i.width)) / 100 for i in items)
             return (True, f"Muvaffaqiyatli saqlandi! ({len(items)}/{total_qty}/{total_metr:g})")
@@ -139,12 +144,12 @@ async def apply_bulk_operation(
 async def get_daily_movements(start_ts: float, end_ts: float) -> list[MovementLog]:
     """Fetch movement logs within a time range."""
     def _query():
-        rows = _conn.execute(
+        rs = _conn.execute(
             "SELECT sklad_id, operation, details, timestamp FROM movements "
             "WHERE timestamp >= ? AND timestamp < ? ORDER BY timestamp ASC",
-            (start_ts, end_ts),
-        ).fetchall()
-        return [MovementLog(*r) for r in rows]
+            [start_ts, end_ts],
+        )
+        return [MovementLog(*r) for r in rs.rows]
     return await asyncio.to_thread(_query)
 
 
@@ -152,14 +157,20 @@ async def clear_sklad(sklad_id: int) -> bool:
     """Reset inventory to 0 and delete movement logs for a specific sklad_id."""
     def _execute():
         try:
-            _conn.execute("UPDATE inventory SET quantity = 0 WHERE sklad_id=?", (sklad_id,))
-            _conn.execute("DELETE FROM movements WHERE sklad_id=?", (sklad_id,))
-            _conn.execute(
-                "INSERT INTO movements (sklad_id, operation, details, timestamp) VALUES (?, ?, ?, ?)",
-                (sklad_id, "CLEAR", "Ombor tozalandi", time.time()),
-            )
-            _conn.commit()
-            _conn.sync()
+            _conn.execute_batch([
+                libsql_client.Statement(
+                    "UPDATE inventory SET quantity = 0 WHERE sklad_id=?", 
+                    [sklad_id]
+                ),
+                libsql_client.Statement(
+                    "DELETE FROM movements WHERE sklad_id=?", 
+                    [sklad_id]
+                ),
+                libsql_client.Statement(
+                    "INSERT INTO movements (sklad_id, operation, details, timestamp) VALUES (?, ?, ?, ?)",
+                    [sklad_id, "CLEAR", "Ombor tozalandi", time.time()]
+                )
+            ])
             return True
         except Exception:
             return False
