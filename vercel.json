@@ -13,7 +13,8 @@
         }
     ],
     "env": {
-        "SKLAD_DB_PATH": "/tmp/sklad.db",
+        "TURSO_DATABASE_URL": "libsql://sklad-bot-boburabdurahimov.aws-ap-south-1.turso.io",
+        "TURSO_AUTH_TOKEN": "eyJhbGciOiJFZERTQSIsInR5cCI6IkpXVCJ9.eyJhIjoicnciLCJnaWQiOiJlNzgyMGY0MS00ZDQ3LTQ1OTYtOWJlMC1hNDdkOTI0NjA4Y2IiLCJpYXQiOjE3NzI2ODk3MDksInJpZCI6ImRjNjNmMGUzLTI3NTAtNDBiOS04MWQ5LTNiOGM4MzBkMzFlNyJ9.L4TI0EfpzXcBwplmhKFeFjMyLJf7T-CI8g1c-piONe2OaaxD_bHifE1X3HSx1C-qHD1B2ht-jEmfaawMVSNTBg",
         "BOT_TOKEN": "8724497147:AAGwX3FrpDyiv45E6zhZHRzGYDNXD_25h-8"
     }
 }
