@@ -13,7 +13,8 @@
         }
     ],
     "env": {
-        "SKLAD_DB_PATH": "/tmp/sklad.db",
+        "TURSO_DATABASE_URL": "libsql://sklad-bot-boburabdurahimov.aws-ap-south-1.turso.io",
+        "TURSO_AUTH_TOKEN": "***REMOVED***",
         "BOT_TOKEN": "***REMOVED***"
     }
 }

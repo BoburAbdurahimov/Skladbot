@@ -15,9 +15,6 @@ from http.server import BaseHTTPRequestHandler
 # Ensure the project root is in sys.path so we can import `bot.*`
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-# Set DB path to /tmp for Vercel
-os.environ.setdefault("SKLAD_DB_PATH", "/tmp/sklad.db")
-
 logger = logging.getLogger(__name__)
 
 # Load bot token safely
