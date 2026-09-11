@@ -148,7 +148,7 @@ async def apply_bulk_operation(
                 )
             )
 
-            _conn.execute_batch(stmts)
+            _conn.batch(stmts)
 
             total_qty = sum(i.qty for i in items)
             total_metr = sum((i.qty * (i.length + i.width)) / 100 for i in items)
@@ -175,7 +175,7 @@ async def clear_sklad(sklad_id: int) -> bool:
     """Reset inventory to 0 and delete movement logs for a specific sklad_id."""
     def _execute():
         try:
-            _conn.execute_batch([
+            _conn.batch([
                 libsql_client.Statement(
                     "UPDATE inventory SET quantity = 0 WHERE sklad_id=?", 
                     [sklad_id]
