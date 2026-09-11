@@ -37,8 +37,15 @@ def _get_conn():
 
 
 def _init_db(conn):
-    """Create tables and seed inventory rows if needed."""
-    conn.execute("""
+    """Create tables and seed inventory rows if needed.
+
+    This runs on every cold start, so it has to stay cheap. The DDL goes out as
+    a single batch, and the seed rows are only written when the table is short.
+    Previously every seed row was its own round trip to Turso, which on its own
+    overran the function timeout.
+    """
+    conn.batch([
+        """
         CREATE TABLE IF NOT EXISTS inventory (
             sklad_id INTEGER NOT NULL,
             length   INTEGER NOT NULL,
@@ -46,8 +53,8 @@ def _init_db(conn):
             quantity INTEGER NOT NULL DEFAULT 0,
             UNIQUE(sklad_id, length, width)
         )
-    """)
-    conn.execute("""
+        """,
+        """
         CREATE TABLE IF NOT EXISTS movements (
             id        INTEGER PRIMARY KEY AUTOINCREMENT,
             sklad_id  INTEGER NOT NULL,
@@ -55,14 +62,25 @@ def _init_db(conn):
             details   TEXT    NOT NULL,
             timestamp REAL    NOT NULL
         )
-    """)
-    for s in SKLADS:
-        for l in ALLOWED_LENGTHS:
-            for w in ALLOWED_WIDTHS:
-                conn.execute(
-                    "INSERT OR IGNORE INTO inventory (sklad_id, length, width, quantity) VALUES (?, ?, ?, 0)",
-                    [s.id, l, w],
-                )
+        """,
+    ])
+
+    expected = SKLAD_COUNT * len(ALLOWED_LENGTHS) * len(ALLOWED_WIDTHS)
+    if conn.execute("SELECT COUNT(*) FROM inventory").rows[0][0] >= expected:
+        return
+
+    seed = [
+        libsql_client.Statement(
+            "INSERT OR IGNORE INTO inventory (sklad_id, length, width, quantity) VALUES (?, ?, ?, 0)",
+            [s.id, l, w],
+        )
+        for s in SKLADS
+        for l in ALLOWED_LENGTHS
+        for w in ALLOWED_WIDTHS
+    ]
+    # Chunked so a fresh database cannot exceed Turso's request size limit.
+    for i in range(0, len(seed), 100):
+        conn.batch(seed[i:i + 100])
 
 
 # Initialize on import

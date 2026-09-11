@@ -11,5 +11,8 @@
             "src": "/api/webhook",
             "dest": "/api/webhook.py"
         }
+    ],
+    "regions": [
+        "bom1"
     ]
 }
